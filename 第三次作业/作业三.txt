@@ -1,0 +1,82 @@
+#include <stdio.h>
+#include "los_task.h"
+#include "cmsis_os2.h"
+
+uint32_t Id1, Id2;
+
+void Thread_Hi(void)
+{
+    uint32_t ret;
+    printf("Thread Hi is run\n");
+
+    LOS_TaskDelay(100);
+    printf("Thread Hi run LOS_TaskDelay over\n");
+
+    ret = LOS_TaskSuspend(Id1);
+    if (ret != LOS_OK) {
+        printf("HI LOS_TaskSuspend Failed!2023192005LinWangRu\n");
+        return;
+    }
+
+    printf("Thread_Hi Resume Success!2023192005LinWangRu\n");
+    return;
+}
+
+void Thread_Lo(void)
+{
+    uint32_t ret;
+    printf("Thread Lo is run\n");
+
+    LOS_TaskDelay(100);
+    printf("Thread_Lo run LOS_TaskDelay over\n");
+
+    ret = LOS_TaskResume(Id1);
+    if (ret != LOS_OK) {
+        printf("LO LOS_TaskResume Failed!2023192005LinWangRu\n");
+        return;
+    }
+
+    printf("LOS_TaskResume OK!2023192005LinWangRu\n");
+    return;
+}
+
+void TaskCaseEntry(void)
+{
+    uint32_t ret;
+    TSK_INIT_PARAM_S initParam;
+
+    LOS_TaskLock();
+
+    printf("LOS_TaskLock Success!2023192005LinWangRu\n");
+
+    /* 创建高优先级任务 Thread_Hi */
+    initParam.pfnTaskEntry = (TSK_ENTRY_FUNC)Thread_Hi;
+    initParam.usTaskPrio = 25;
+    initParam.pcName = "TaskHi";
+    initParam.uwStackSize = 4096;
+
+    ret = LOS_TaskCreate(&Id1, &initParam);
+    if (ret != LOS_OK) {
+        LOS_TaskUnlock();
+        printf("LOS_TaskCreate create Failed!2023192005LinWangRu\n");
+        return;
+    }
+    printf("LOS_TaskCreate HI create Success!2023192005LinWangRu\n");
+
+    /* 创建低优先级任务 Thread_Lo */
+    initParam.pfnTaskEntry = (TSK_ENTRY_FUNC)Thread_Lo;
+    initParam.usTaskPrio = 27;
+    initParam.pcName = "TaskLo";
+    initParam.uwStackSize = 4096;
+
+    ret = LOS_TaskCreate(&Id2, &initParam);
+    if (ret != LOS_OK) {
+        LOS_TaskUnlock();
+        printf("LOS_TaskCreate create Failed!2023192005LinWangRu\n");
+        return;
+    }
+
+    LOS_TaskUnlock();
+    
+    return;
+}

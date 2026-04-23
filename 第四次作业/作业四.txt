@@ -1,0 +1,116 @@
+#include <stdio.h>
+#include "los_task.h"
+#include "cmsis_os2.h"
+#include "los_mux.h"
+
+UINT32 g_mutexId;
+UINT32 g_taskId1;  
+UINT32 g_taskId2;
+
+/* 低优先级任务：Example_MutexTask1 */
+VOID Example_MutexTask1(VOID)
+{
+    UINT32 ret;
+
+    printf("Example_MutexTask1 start to pend mutex with 10Tick timeout\n");
+
+    ret = LOS_MuxPend(g_mutexId, 10);
+    if (ret == LOS_ERRNO_MUX_TIMEOUT) {
+        printf("Example_MutexTask1 pend mutex timeout (10Tick), now pend forever\n");
+
+        ret = LOS_MuxPend(g_mutexId, LOS_WAIT_FOREVER);
+        if (ret == LOS_OK) {
+            printf("Example_MutexTask1 get mutex successfully!2023192005LinWangRu\n");
+        }
+    }
+
+    ret = LOS_MuxPost(g_mutexId);
+    if (ret == LOS_OK) {
+        printf("Example_MutexTask1 post mutex successfully!2023192005LinWangRu\n");
+    }
+
+    ret = LOS_MuxDelete(g_mutexId);
+    if (ret == LOS_OK) {
+        printf("Example_MutexTask1 delete mutex successfully!2023192005LinWangRu\n");
+    }
+
+    printf("Example_MutexTask1 exit!2023192005LinWangRu\n");
+    return;
+}
+
+/* 高优先级任务：Example_MutexTask2 */
+VOID Example_MutexTask2(VOID)
+{
+    UINT32 ret;
+
+    printf("Example_MutexTask2 start to pend mutex forever\n");
+    // 1. 以永久阻塞模式申请互斥锁
+    ret = LOS_MuxPend(g_mutexId, LOS_WAIT_FOREVER);
+    if (ret == LOS_OK) {
+        printf("Example_MutexTask2 get mutex successfully!2023192005LinWangRu\n");
+    }
+
+    // 2. 休眠100Tick，让低优先级任务有机会运行
+    printf("Example_MutexTask2 start to sleep 100Tick\n");
+    LOS_TaskDelay(100);
+
+    // 3. 休眠结束，释放互斥锁
+    ret = LOS_MuxPost(g_mutexId);
+    if (ret == LOS_OK) {
+        printf("Example_MutexTask2 post mutex successfully!2023192005LinWangRu\n");
+    }
+
+    printf("Example_MutexTask2 exit!2023192005LinWangRu\n");
+    return;
+}
+
+/* 任务创建入口：对应图中的 Example_TaskEntry */
+VOID Example_TaskEntry(VOID)
+{
+    UINT32 ret;
+    TSK_INIT_PARAM_S task1Param = {0};
+    TSK_INIT_PARAM_S task2Param = {0};
+
+    // 1. 初始化并创建互斥锁
+    ret = LOS_MuxCreate(&g_mutexId);
+    if (ret != LOS_OK) {
+        printf("Create mutex failed! ret: 0x%x\n", ret);
+        return;
+    }
+    printf("Create mutex successfully, mutexId: %u\n", g_mutexId);
+
+    // 2. 锁任务调度，防止刚创建的任务立刻抢占
+    LOS_TaskLock();
+
+    // 3. 创建低优先级任务（Example_MutexTask1，优先级27）
+    task1Param.pfnTaskEntry = (TSK_ENTRY_FUNC)Example_MutexTask1;
+    task1Param.usTaskPrio = 27;
+    task1Param.pcName = "MutexTask1";
+    task1Param.uwStackSize = 4096;
+    ret = LOS_TaskCreate(&g_taskId1, &task1Param);
+    if (ret != LOS_OK) {
+        printf("Create MutexTask1 failed! ret: 0x%x\n", ret);
+        LOS_TaskUnlock();
+        return;
+    }
+    printf("Create MutexTask1 successfully!2023192005LinWangRu\n");
+
+    // 4. 创建高优先级任务（Example_MutexTask2，优先级25）
+    task2Param.pfnTaskEntry = (TSK_ENTRY_FUNC)Example_MutexTask2;
+    task2Param.usTaskPrio = 25;
+    task2Param.pcName = "MutexTask2";
+    task2Param.uwStackSize = 4096;
+    ret = LOS_TaskCreate(&g_taskId2, &task2Param);
+    if (ret != LOS_OK) {
+        printf("Create MutexTask2 failed! ret: 0x%x\n", ret);
+        LOS_TaskUnlock();
+        return;
+    }
+    printf("Create MutexTask2 successfully!2023192005LinWangRu\n");
+
+    // 5. 解锁任务调度，两个任务开始运行
+    LOS_TaskUnlock();
+    printf("Unlock task scheduler, tasks start running\n");
+
+    return;
+}
