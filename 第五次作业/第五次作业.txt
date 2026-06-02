@@ -1,0 +1,125 @@
+#include "los_queue.h"
+#include "los_task.h"
+#include "shell.h"
+#include "shcmd.h"
+#include <stdio.h>
+#include <unistd.h>
+
+#define BUFFER_LEN 50
+#define SEND_TASK_PRIO  6   
+#define RECV_TASK_PRIO  5
+#define QUEUE_MAX_MSG   5   
+#define QUEUE_MSG_SIZE  BUFFER_LEN
+
+STATIC UINT32 myqueue;      
+
+VOID SendEntry(VOID)
+{
+    UINT32 ret = 0;
+    CHAR msg[BUFFER_LEN] = {0};
+    UINT32 sendCount = 0;
+
+    while (1) {
+
+        snprintf(msg, BUFFER_LEN, "testmsg %u", sendCount++);
+        UINT32 len = strlen(msg) + 1; 
+
+        ret = LOS_QueueWriteCopy(myqueue, msg, len, 100);
+        if (ret == LOS_OK) {
+            printf("[SendTask] send: %s\n", msg);
+        } else {
+            printf("[SendTask] send failed, ret: 0x%x\n", ret);
+        }
+
+        LOS_TaskDelay(100); 
+    }
+}
+
+VOID RecvEntry(VOID)
+{
+    UINT32 ret = 0;
+    CHAR readBuf[BUFFER_LEN] = {0};
+    UINT32 readLen = BUFFER_LEN;
+    UINT32 recvCount = 0;
+    const UINT32 RECV_MAX = 3; 
+
+    while (1) {
+        readLen = BUFFER_LEN;
+        ret = LOS_QueueReadCopy(myqueue, readBuf, &readLen, LOS_WAIT_FOREVER);
+        if (ret == LOS_OK) {
+            printf("[RecvTask] recv: %s\n", readBuf);
+            recvCount++;
+        } else {
+            printf("[RecvTask] recv failed, ret: 0x%x\n", ret);
+            continue;
+        }
+
+        if (recvCount >= RECV_MAX) {
+            printf("[RecvTask] recv count reached, deleting queue...\n");
+            ret = LOS_QueueDelete(myqueue);
+            if (ret == LOS_OK) {
+                printf("[RecvTask] delete queue success.\n");
+            } else {
+                printf("[RecvTask] delete queue failed, ret: 0x%x\n", ret);
+            }
+            break; 
+        }
+    }
+
+    LOS_TaskDelete(LOS_CurTaskIDGet());
+}
+
+UINT32 MyQueue()
+{
+    printf("=== start queue example ===\n");
+    UINT32 ret = 0;
+    UINT32 sendTaskID, recvTaskID;
+    TSK_INIT_PARAM_S sendTaskParam = {0};
+    TSK_INIT_PARAM_S recvTaskParam = {0};
+
+    ret = LOS_QueueCreate("msg_queue", QUEUE_MAX_MSG, &myqueue, 0, QUEUE_MSG_SIZE);
+    if (ret != LOS_OK) {
+        printf("create queue failed, ret: 0x%x\n", ret);
+        return ret;
+    }
+    printf("create queue success, queue id: %u\n", myqueue);
+
+    sendTaskParam.pfnTaskEntry = (TSK_ENTRY_FUNC)SendEntry;
+    sendTaskParam.usTaskPrio = SEND_TASK_PRIO;
+    sendTaskParam.uwStackSize = LOSCFG_BASE_CORE_TSK_DEFAULT_STACK_SIZE;
+    sendTaskParam.pcName = "send_task";
+    sendTaskParam.uwResved = 0;
+
+    recvTaskParam.pfnTaskEntry = (TSK_ENTRY_FUNC)RecvEntry;
+    recvTaskParam.usTaskPrio = RECV_TASK_PRIO; 
+    recvTaskParam.uwStackSize = LOSCFG_BASE_CORE_TSK_DEFAULT_STACK_SIZE;
+    recvTaskParam.pcName = "recv_task";
+    recvTaskParam.uwResved = 0;
+
+    LOS_TaskLock(); 
+    ret = LOS_TaskCreate(&recvTaskID, &recvTaskParam);
+    if (ret != LOS_OK) {
+        printf("create recv task failed, ret: 0x%x\n", ret);
+        LOS_QueueDelete(myqueue); 
+        LOS_TaskUnlock();
+        return ret;
+    }
+    ret = LOS_TaskCreate(&sendTaskID, &sendTaskParam);
+    if (ret != LOS_OK) {
+        printf("create send task failed, ret: 0x%x\n", ret);
+        LOS_TaskDelete(recvTaskID); 
+        LOS_QueueDelete(myqueue);   
+        LOS_TaskUnlock();
+        return ret;
+    }
+    LOS_TaskUnlock(); 
+
+    printf("tasks created successfully, waiting for message...\n");
+    return LOS_OK;
+}
+
+int registerMyQueue()
+{
+    OsShellInit();
+    return osCmdReg(CMD_TYPE_EX, "queuetest", 0, (CmdCallBackFunc)MyQueue);
+}

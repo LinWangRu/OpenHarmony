@@ -1,0 +1,311 @@
+#include "mem_demo.h"
+#include <stdio.h>
+#include <string.h>
+#include "los_task.h"
+#include "los_config.h"
+
+void *g_memPool1 = NULL;
+void *g_testPool1 = NULL;
+
+void MemBasicAlloc(void)
+{
+    g_memPool1 = LOS_MemAlloc((VOID *)LOSCFG_SYS_HEAP_ADDR, TEST_MEM_SIZE);
+    g_testPool1 = LOS_MemAlloc((VOID *)LOSCFG_SYS_HEAP_ADDR, TEST_POOL_SIZE);
+
+    if ((g_memPool1 == NULL) || (g_testPool1 == NULL))
+    {
+        PRINT_ERR("2023192005林王儒: MemBasicAlloc: alloc failed, other tests will fail!!!\n");
+    }
+    else
+    {
+        printf("2023192005林王儒: MemBasicAlloc: alloc OK, heap=0x%x, g_memPool1=%p, g_testPool1=%p\n",
+                LOSCFG_SYS_HEAP_ADDR, g_memPool1, g_testPool1);
+    }
+}
+
+void MemBasicFree(void)
+{
+    UINT32 ret;
+    if (g_memPool1 != NULL)
+    {
+        ret = LOS_MemFree((VOID *)LOSCFG_SYS_HEAP_ADDR, g_memPool1);
+        if (ret == LOS_OK)
+            printf("2023192005林王儒: MemBasicFree: g_memPool1 free ok\n");
+        else
+            PRINT_ERR("2023192005林王儒: MemBasicFree: g_memPool1 free failed\n");
+    }
+    else
+        printf("2023192005林王儒: MemBasicFree: g_memPool1 is NULL\n");
+
+    if (g_testPool1 != NULL)
+    {
+        ret = LOS_MemFree((VOID *)LOSCFG_SYS_HEAP_ADDR, g_testPool1);
+        if (ret == LOS_OK)
+            printf("2023192005林王儒: MemBasicFree: g_testPool1 free ok\n");
+        else
+            PRINT_ERR("2023192005林王儒: MemBasicFree: g_testPool1 free failed\n");
+    }
+    else
+        printf("2023192005林王儒: MemBasicFree: g_testPool1 is NULL\n");
+}
+
+void MemTestInit(void)
+{
+    UINT32 ret = LOS_MemInit(g_memPool1, TEST_MEM_SIZE);
+    if (ret == LOS_OK)
+        printf("2023192005林王儒: MemTestInit: g_memPool1 init ok\n");
+    else
+        PRINT_ERR("2023192005林王儒: MemTestInit: g_memPool1 init failed\n");
+}
+
+void MemTestDeinit(void)
+{
+    memset(g_memPool1, 0, TEST_MEM_SIZE);
+    printf("2023192005林王儒: MemTestDeinit: zero g_memPool1 ok\n");
+}
+
+VOID Basic_Test(void)
+{
+    printf("2023192005林王儒: Basic_Test start\n");
+    MemBasicAlloc();
+    MemBasicFree();
+    printf("2023192005林王儒: Basic_Test end\n");
+}
+
+VOID BasicAlloc_Free(void)
+{
+    UINT32 ret;
+    UINT32 size = 0x100;
+    void *p = NULL;
+
+    printf("2023192005林王儒: BasicAlloc_Free start\n");
+    p = LOS_MemAlloc((VOID *)LOSCFG_SYS_HEAP_ADDR, size);
+    if (p == NULL)
+    {
+        PRINT_ERR("2023192005林王儒: BasicAlloc_Free: alloc failed\n");
+        return;
+    }
+    printf("2023192005林王儒: BasicAlloc_Free: alloc ok, p=%p\n", p);
+
+    memset(p, 1, size);
+    printf("2023192005林王儒: BasicAlloc_Free: memory content:\n");
+    for (int i = 0; i < size; i++)
+    {
+        printf("%02x ", *(uint8_t *)(p + i));
+        if ((i + 1) % 16 == 0) printf("\n");
+    }
+
+    ret = LOS_MemFree((VOID *)LOSCFG_SYS_HEAP_ADDR, p);
+    if (ret == LOS_OK)
+        printf("2023192005林王儒: BasicAlloc_Free: free ok\n");
+    else
+        PRINT_ERR("2023192005林王儒: BasicAlloc_Free: free failed\n");
+    printf("2023192005林王儒: BasicAlloc_Free end\n");
+}
+
+VOID Zero_Max_Alloc_Free(void)
+{
+    UINT32 size;
+    void *p = NULL;
+    printf("2023192005林王儒: Zero_Max_Alloc_Free start\n");
+
+    size = 0;
+    p = LOS_MemAlloc((VOID *)LOSCFG_SYS_HEAP_ADDR, size);
+    if (p != NULL)
+        PRINT_ERR("2023192005林王儒: Zero_Max_Alloc_Free: 0-byte alloc failed\n");
+    else
+        printf("2023192005林王儒: Zero_Max_Alloc_Free: 0-byte alloc ok (NULL)\n");
+
+    size = 0xFFFFFFFF;
+    p = LOS_MemAlloc((VOID *)LOSCFG_SYS_HEAP_ADDR, size);
+    if (p != NULL)
+        PRINT_ERR("2023192005林王儒: Zero_Max_Alloc_Free: max-size alloc failed\n");
+    else
+        printf("2023192005林王儒: Zero_Max_Alloc_Free: max-size alloc ok (NULL)\n");
+
+    printf("2023192005林王儒: Zero_Max_Alloc_Free end\n");
+}
+
+VOID oneByteAlloc(void)
+{
+    UINT32 ret;
+    UINT32 size = 0x1;
+    void *p = NULL;
+    printf("2023192005林王儒: oneByteAlloc start\n");
+
+    p = LOS_MemAlloc((VOID *)LOSCFG_SYS_HEAP_ADDR, size);
+    if (p == NULL)
+    {
+        PRINT_ERR("2023192005林王儒: oneByteAlloc: alloc failed\n");
+        return;
+    }
+    printf("2023192005林王儒: oneByteAlloc: alloc ok, p=%p\n", p);
+
+    ret = LOS_MemFree((VOID *)LOSCFG_SYS_HEAP_ADDR, p);
+    if (ret == LOS_OK)
+        printf("2023192005林王儒: oneByteAlloc: free ok\n");
+    else
+        PRINT_ERR("2023192005林王儒: oneByteAlloc: free failed\n");
+
+    printf("2023192005林王儒: oneByteAlloc end\n");
+}
+
+VOID InitMemWithIlligalParam(void)
+{
+    UINT32 ret;
+    printf("2023192005林王儒: InitMemWithIlligalParam start\n");
+
+    ret = LOS_MemInit(NULL, TEST_MEM_SIZE);
+    if (ret == LOS_NOK)
+        printf("2023192005林王儒: InitMemWithIlligalParam: NULL pool init ok (LOS_NOK)\n");
+    else
+        PRINT_ERR("2023192005林王儒: InitMemWithIlligalParam: NULL pool init failed\n");
+
+    ret = LOS_MemInit(g_memPool1, MIN_MEM_POOL_SIZE - 1);
+    if (ret == LOS_NOK)
+        printf("2023192005林王儒: InitMemWithIlligalParam: small size init ok (LOS_NOK)\n");
+    else
+        PRINT_ERR("2023192005林王儒: InitMemWithIlligalParam: small size init failed\n");
+
+    printf("2023192005林王儒: InitMemWithIlligalParam end\n");
+}
+
+VOID poolInitMem(void)
+{
+    void *pool = NULL;
+    UINT32 ret;
+    printf("2023192005林王儒: poolInitMem start\n");
+
+    printf("2023192005林王儒: poolInitMem: g_memPool1=%p\n", g_memPool1);
+    ret = LOS_MemInit(g_memPool1, TEST_MEM_SIZE);
+    if (ret != LOS_OK)
+    {
+        PRINT_ERR("2023192005林王儒: poolInitMem: g_memPool1 init failed\n");
+        return;
+    }
+    printf("2023192005林王儒: poolInitMem: g_memPool1 init ok\n");
+
+    pool = (void *)((uintptr_t)g_memPool1 + LOS_MemPoolSizeGet(g_memPool1));
+    ret = LOS_MemInit(pool, MIN_MEM_POOL_SIZE + 1000);
+    if (ret == LOS_OK)
+        printf("2023192005林王儒: poolInitMem: nested pool init ok\n");
+    else
+        PRINT_ERR("2023192005林王儒: poolInitMem: nested pool init failed\n");
+
+    printf("2023192005林王儒: poolInitMem end\n");
+}
+
+VOID ContinueAlloc(void)
+{
+    UINT32 size = 0x400, memFreeSize;
+    unsigned long counter = 0;
+    void *p0 = NULL;
+    printf("2023192005林王儒: ContinueAlloc start\n");
+
+    MemTestInit();
+    while (1)
+    {
+        p0 = LOS_MemAlloc(g_memPool1, size);
+        if (p0 == NULL) break;
+        counter++;
+    }
+
+    memFreeSize = LOS_MemPoolSizeGet(g_memPool1) - LOS_MemTotalUsedGet(g_memPool1);
+    if (memFreeSize >= (size + LOS_MEM_NODE_HEAD_SIZE + LOS_MEM_POOL_SIZE))
+        printf("2023192005林王儒: ContinueAlloc: alloc %lu times, free=%u\n", counter, memFreeSize);
+    else
+        printf("2023192005林王儒: ContinueAlloc: alloc %lu times, memory out\n", counter);
+
+    p0 = LOS_MemAlloc(g_memPool1, size);
+    if (p0 != NULL)
+        printf("2023192005林王儒: ContinueAlloc: last alloc ok, p0=%p\n", p0);
+    else
+        PRINT_ERR("2023192005林王儒: ContinueAlloc: last alloc failed\n");
+
+    MemTestDeinit();
+    printf("2023192005林王儒: ContinueAlloc end\n");
+}
+
+VOID ReallocMem(VOID)
+{
+    UINT32 size = 0x500, freesize;
+    void *p0 = NULL, *f0 = NULL;
+    void *p[TEST_MEM_SIZE / 0x500] = {NULL};
+    int i = 0;
+    printf("2023192005林王儒: ReallocMem start\n");
+
+    MemTestInit();
+    for (p0 = LOS_MemAlloc(g_memPool1, size); p0 != NULL; i++)
+    {
+        printf("2023192005林王儒: ReallocMem: p[%d]=%p\n", i, p0);
+        freesize = LOS_MemPoolSizeGet(g_memPool1) - LOS_MemTotalUsedGet(g_memPool1);
+        printf("2023192005林王儒: ReallocMem: free=%u\n", freesize);
+        p[i] = p0;
+        p0 = LOS_MemAlloc(g_memPool1, size);
+    }
+
+    p0 = LOS_MemRealloc(g_memPool1, p[0], size / 2);
+    if (p0 != NULL)
+        printf("2023192005林王儒: ReallocMem: realloc half ok, p0=%p\n", p0);
+    else
+        PRINT_ERR("2023192005林王儒: ReallocMem: realloc half failed\n");
+
+    f0 = LOS_MemAlloc(g_memPool1, size / 4);
+    if (f0 != NULL)
+        printf("2023192005林王儒: ReallocMem: alloc quarter ok, f0=%p\n", f0);
+    else
+        PRINT_ERR("2023192005林王儒: ReallocMem: alloc quarter failed\n");
+
+    if (((uintptr_t)p[0] < (uintptr_t)f0) && ((uintptr_t)f0 < (uintptr_t)p[1]))
+        printf("2023192005林王儒: ReallocMem: pointer order ok\n");
+    else
+        PRINT_ERR("2023192005林王儒: ReallocMem: pointer order error\n");
+
+    MemTestDeinit();
+    printf("2023192005林王儒: ReallocMem end\n");
+}
+
+VOID Mem_Demo(void)
+{
+    printf("2023192005林王儒: ========== LiteOS-M 内存管理实验 ==========\n");
+    Basic_Test();
+    BasicAlloc_Free();
+    Zero_Max_Alloc_Free();
+    oneByteAlloc();
+    InitMemWithIlligalParam();
+    poolInitMem();
+    ContinueAlloc();
+    ReallocMem();
+    printf("2023192005林王儒: ========== 内存管理实验完成 ==========\n");
+}
+
+static void AutoRunTask(VOID)
+{
+    LOS_TaskDelay(300);
+
+    Mem_Demo();
+    while(1)
+    {
+        LOS_TaskDelay(1000);
+    }
+}
+
+unsigned int MemDemoAppInit(VOID)
+{
+    UINT32 taskId;
+    TSK_INIT_PARAM_S taskParam = {0};
+
+    taskParam.pfnTaskEntry = (TSK_ENTRY_FUNC)AutoRunTask;
+    taskParam.uwStackSize  = 0x2000;
+    taskParam.pcName       = "MemDemoAutoRun";
+    taskParam.usTaskPrio   = 10;
+    taskParam.uwArg        = 0;
+
+    if (LOS_TaskCreate(&taskId, &taskParam) != LOS_OK)
+    {
+        PRINT_ERR("AutoRunTask create failed!\n");
+        return LOS_NOK;
+    }
+
+    return LOS_OK;
+}
