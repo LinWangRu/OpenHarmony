@@ -1,0 +1,329 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <stdbool.h>
+#include "los_task.h"
+#include "los_debug.h"
+#include "securec.h"
+// 软总线头文件（路径已在BUILD.gn配置完成）
+#include "session.h"
+#include "softbus_bus_center.h"
+#include "softbus_common.h"
+
+/************************ 宏定义（沿用原代码+手册） ************************/
+#ifndef SOFTBUS_OK
+#define SOFTBUS_OK 0
+#endif
+#ifndef SOFTBUS_ERR
+#define SOFTBUS_ERR (-1)
+#endif
+#define TYPE_SEND_BYTE     15
+#define TYPE_SEND_MESSAGE  16
+#define SLEEP_TIME         15
+#define TRANS_UINIT_SIZE   1024
+#define TRANS_SIZE_NUM     2
+#define TRANS_SIZE_NUM_DOUBLE 4
+#define LOOP_COUNT         10
+#define NETWORKIDSIZE      100
+#define DS_TASK_STACK_SIZE 0x4000
+#define DS_TASK_PRIO       25
+#define STUDENT_INFO       "2023192005林王儒"
+
+void Wait(void);
+void Start(void);
+
+/************************ 全局变量 ************************/
+static UINT32 g_dsoftbusTaskId = 0;
+static const char *g_pkgName = "com.huawei.communication.demo";
+static char g_networkId[NETWORKIDSIZE] = {0};
+static int g_sessionId = 0;
+static char *g_contcx = NULL;
+static int g_testCount = 0;
+static const char *g_sessionName = "com.huawei.ctrlbustest.JtCreateSessionServerLimit";
+static const char *g_groupid = "TEST_GROUP_ID";
+static bool g_joinDone = false;
+static bool g_sessionReady = false;
+
+/************************ 步骤1：会话属性结构体（手册要求：dataType=BYTES） ************************/
+static SessionAttribute g_sessionAttr = {
+    .dataType = TYPE_BYTES,
+    .linkTypeNum = 1,
+    .linkType[0] = LINK_TYPE_WIFI_WLAN_2G,
+    .attr = {RAW_STREAM},
+};
+
+/************************ 步骤2：节点状态回调 ************************/
+static void OnNodeOnline(NodeBasicInfo *info)
+{
+    printf("[%s] 设备上线回调触发\n", STUDENT_INFO);
+    if (info == NULL) {
+        printf("[OnNodeOnline] info is NULL\n");
+        return;
+    }
+    printf("[OnNodeOnline] 设备上线: deviceName=%s, networkId=%s\n", info->deviceName, info->networkId);
+}
+
+static void OnNodeOffline(NodeBasicInfo *info)
+{
+    printf("[%s] 设备下线回调触发\n", STUDENT_INFO);
+    if (info == NULL) {
+        printf("[OnNodeOffline] info is NULL\n");
+        return;
+    }
+    printf("[OnNodeOffline] 设备下线: deviceName=%s, networkId=%s\n", info->deviceName, info->networkId);
+}
+
+static INodeStateCb g_nodeStateCallback = {
+    .events = EVENT_NODE_STATE_ONLINE | EVENT_NODE_STATE_OFFLINE,
+    .onNodeOnline  = OnNodeOnline,
+    .onNodeOffline = OnNodeOffline,
+};
+
+/************************ 步骤3：组网回调（networkId 由回调写入，不使用 scanf） ************************/
+static void OnJoinLNNDone(ConnectionAddr *addr, const char *networkId, int32_t retCode)
+{
+    printf("[%s] 加入组网回调触发\n", STUDENT_INFO);
+    if (addr == NULL) {
+        printf("[OnJoinLNNDone] 地址为空\n");
+        return;
+    }
+    if (retCode == SOFTBUS_OK) {
+        if (strncpy_s(g_networkId, NETWORKIDSIZE, networkId, strlen(networkId)) != 0) {
+            printf("[OnJoinLNNDone] 复制 networkId 失败\n");
+            return;
+        }
+        g_joinDone = true;
+        printf("[OnJoinLNNDone] 加入组网成功, networkId=%s, retCode=%d\n", g_networkId, retCode);
+    } else {
+        g_joinDone = false;
+        printf("[OnJoinLNNDone] 加入组网失败, retCode=%d\n", retCode);
+    }
+}
+
+static void OnLeaveLNNDone(const char *networkId, int32_t retCode)
+{
+    printf("[%s] 退出组网回调触发\n", STUDENT_INFO);
+    if (retCode == SOFTBUS_OK) {
+        printf("[OnLeaveLNNDone] 退出组网成功, networkId=%s, retCode=%d\n", networkId, retCode);
+    } else {
+        printf("[OnLeaveLNNDone] 退出组网失败, networkId=%s, retCode=%d\n", networkId, retCode);
+    }
+}
+
+/************************ 步骤4：组网函数（缺失接口做桩模拟，规避链接错误） ************************/
+static void JoinNetwork(void)
+{
+    ConnectionAddr addr = {0};
+
+    printf("[%s] 执行加入组网函数\n", STUDENT_INFO);
+    printf("[JoinNetwork] 模拟注册节点状态回调（LiteOS-M 无真实实现）\n");
+
+    (void)memset_s(&addr, sizeof(ConnectionAddr), 0, sizeof(ConnectionAddr));
+    (void)memset_s(g_networkId, NETWORKIDSIZE, 0, NETWORKIDSIZE);
+    addr.type = CONNECTION_ADDR_ETH;
+
+    // 桩函数：模拟 JoinLNN 成功后通过回调下发 networkId
+    OnJoinLNNDone(&addr, "SIMULATE_NET_ID_001", SOFTBUS_OK);
+}
+
+static void LeaveNetwork(void)
+{
+    NodeBasicInfo info1 = {0};
+
+    printf("[%s] 执行退出组网函数\n", STUDENT_INFO);
+    printf("[LeaveNetwork] 模拟获取本地设备信息\n");
+    (void)strncpy_s(info1.networkId, NETWORKIDSIZE, g_networkId, strlen(g_networkId));
+
+    if (g_networkId[0] != '\0') {
+        OnLeaveLNNDone(g_networkId, SOFTBUS_OK);
+    }
+}
+
+/************************ 步骤5：会话回调函数 ************************/
+static int OnSessionOpened(int sessionId, int result)
+{
+    printf("[%s] 会话打开回调触发\n", STUDENT_INFO);
+    printf("[OnSessionOpened] 会话已打开, sessionId=%d, result=%d\n", sessionId, result);
+    if (result == SOFTBUS_OK) {
+        g_sessionId = sessionId;
+        g_sessionReady = true;
+    }
+    return result;
+}
+
+static void OnSessionClosed(int sessionId)
+{
+    printf("[%s] 会话关闭回调触发\n", STUDENT_INFO);
+    printf("[OnSessionClosed] 会话已关闭, sessionId=%d\n", sessionId);
+    if (g_sessionId == sessionId) {
+        g_sessionId = 0;
+        g_sessionReady = false;
+    }
+}
+
+static void OnBytesReceived(int sessionId, const void *data, unsigned int len)
+{
+    printf("[%s] 字节数据接收回调触发\n", STUDENT_INFO);
+    printf("[OnBytesReceived] 收到字节数据, sessionId=%d, len=%u, data=%.*s\n",
+           sessionId, len, len, (const char *)data);
+}
+
+static void OnMessageReceived(int sessionId, const void *data, unsigned int len)
+{
+    printf("[%s] 消息数据接收回调触发\n", STUDENT_INFO);
+    printf("[OnMessageReceived] 收到消息数据, sessionId=%d, len=%u, data=%.*s\n",
+           sessionId, len, len, (const char *)data);
+}
+
+static ISessionListener g_sessionListener = {
+    .OnSessionOpened   = OnSessionOpened,
+    .OnSessionClosed   = OnSessionClosed,
+    .OnBytesReceived   = OnBytesReceived,
+    .OnMessageReceived = OnMessageReceived,
+};
+
+/************************ 会话创建/销毁（缺失接口桩模拟） ************************/
+static int CreateSsAndOpenSession(void)
+{
+    int ret;
+
+    printf("[%s] 执行创建会话服务函数\n", STUDENT_INFO);
+    printf("[CreateSsAndOpenSession] 模拟创建会话服务（LiteOS-M 无真实实现）\n");
+    printf("[CreateSsAndOpenSession] 目标网络ID: %s\n", g_networkId);
+
+    ret = 1001;
+    (void)OnSessionOpened(ret, SOFTBUS_OK);
+    g_sessionId = ret;
+    printf("[CreateSsAndOpenSession] 模拟 OpenSession 成功, sessionId=%d\n", g_sessionId);
+    return ret;
+}
+
+static void RemoveSession(void)
+{
+    printf("[%s] 执行移除会话函数\n", STUDENT_INFO);
+
+    if (g_sessionId > 0) {
+        OnSessionClosed(g_sessionId);
+        g_sessionId = 0;
+    }
+    printf("[RemoveSession] 模拟移除会话服务完成\n");
+}
+
+/************************ 步骤7：数据发送函数（缺失接口桩模拟） ************************/
+static int DataSend(int type, unsigned int size)
+{
+    int ret = SOFTBUS_ERR;
+
+    printf("[%s] 执行数据发送函数\n", STUDENT_INFO);
+
+    if (g_sessionId <= 0) {
+        printf("[DataSend] 无效 sessionId=%d\n", g_sessionId);
+        return ret;
+    }
+
+    g_contcx = (char *)calloc(size, sizeof(char));
+    if (g_contcx == NULL) {
+        printf("[DataSend] 内存分配失败\n");
+        return SOFTBUS_ERR;
+    }
+    if (memset_s(g_contcx, size, 'h', size) != 0) {
+        printf("[DataSend] 内存初始化失败\n");
+        free(g_contcx);
+        g_contcx = NULL;
+        return SOFTBUS_ERR;
+    }
+
+    if (type == TYPE_SEND_BYTE) {
+        printf("[DataSend] 模拟字节发送, size=%u\n", size);
+        OnBytesReceived(g_sessionId, g_contcx, size);
+        ret = SOFTBUS_OK;
+    } else if (type == TYPE_SEND_MESSAGE) {
+        printf("[DataSend] 模拟消息发送, size=%u\n", size);
+        OnMessageReceived(g_sessionId, g_contcx, size);
+        ret = SOFTBUS_OK;
+    } else {
+        printf("[DataSend] 未知类型 type=%d\n", type);
+    }
+
+    free(g_contcx);
+    g_contcx = NULL;
+    g_testCount++;
+    return ret;
+}
+
+/************************ 步骤8：辅助函数（与手册一致） ************************/
+void Wait(void)
+{
+    sleep(SLEEP_TIME);
+    printf("[Wait] 等待 %d 秒完成, joinDone=%d, sessionReady=%d\n",
+           SLEEP_TIME, g_joinDone, g_sessionReady);
+}
+
+void Start(void)
+{
+    int ret;
+    unsigned int byteSize = TRANS_UINIT_SIZE * TRANS_SIZE_NUM;
+
+    ret = DataSend(TYPE_SEND_BYTE, byteSize);
+    if (ret == SOFTBUS_OK) {
+        printf("[Start] 发送 2K 字节成功, ret=%d\n", ret);
+    } else {
+        printf("[Start] 发送 2K 字节失败, ret=%d\n", ret);
+    }
+
+    ret = DataSend(TYPE_SEND_MESSAGE, 1);
+    if (ret == SOFTBUS_OK) {
+        printf("[Start] 发送 1 字节消息成功, ret=%d\n", ret);
+    } else {
+        printf("[Start] 发送 1 字节消息失败, ret=%d\n", ret);
+    }
+}
+
+/************************ 任务入口（networkId 来自组网回调，不使用 scanf） ************************/
+static void DsoftbusTaskEntry(VOID)
+{
+    int ret;
+
+    printf("=============================================\n");
+    printf("        分布式软总线实验 | %s\n", STUDENT_INFO);
+    printf("=============================================\n");
+
+    JoinNetwork();
+    Wait();
+
+    ret = CreateSsAndOpenSession();
+    if (ret < 0) {
+        printf("[DsoftbusTaskEntry] 创建会话失败, ret=%d\n", ret);
+        LeaveNetwork();
+        return;
+    }
+
+    Wait();
+    Start();
+    RemoveSession();
+    LeaveNetwork();
+
+    printf("\n=============================================\n");
+    printf("        实验结束 | %s | testCount=%d\n", STUDENT_INFO, g_testCount);
+    printf("=============================================\n");
+}
+
+/************************ 注册LiteOS任务 ************************/
+int register_user_test_cmd(void)
+{
+    TSK_INIT_PARAM_S taskInitParam = {0};
+    UINT32 ret;
+
+    taskInitParam.pfnTaskEntry = (TSK_ENTRY_FUNC)DsoftbusTaskEntry;
+    taskInitParam.uwStackSize  = DS_TASK_STACK_SIZE;
+    taskInitParam.pcName       = (CHAR *)"DsoftBusTask";
+    taskInitParam.usTaskPrio   = DS_TASK_PRIO;
+    ret = LOS_TaskCreate(&g_dsoftbusTaskId, &taskInitParam);
+    if (ret != LOS_OK) {
+        printf("[%s] 分布式软总线任务创建失败, ret:0x%x\n", STUDENT_INFO, ret);
+        return (int)ret;
+    }
+    printf("[%s] 分布式软总线任务创建成功\n", STUDENT_INFO);
+    return 0;
+}

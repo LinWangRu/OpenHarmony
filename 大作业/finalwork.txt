@@ -1,0 +1,227 @@
+#include <stdio.h>
+#include <stdint.h>
+#include <string.h>
+#include <stdlib.h>
+#include "shell.h"
+#include "shcmd.h"
+#include "los_event.h"
+#include "los_task.h"
+#include "los_debug.h"
+
+typedef int INT32;
+
+#define STUDENT_ID "2023192005林王儒"
+
+#define PRODUCT_COUNT 6
+
+#define EVENT_PRODUCT_1  (1U << 0)
+#define EVENT_PRODUCT_2  (1U << 1)
+#define EVENT_PRODUCT_3  (1U << 2)
+#define EVENT_PRODUCT_4  (1U << 3)
+#define EVENT_PRODUCT_5  (1U << 4)
+#define EVENT_PRODUCT_6  (1U << 5)
+
+#define CHEF1_EVENT_MASK (EVENT_PRODUCT_1 | EVENT_PRODUCT_2 | EVENT_PRODUCT_3 | EVENT_PRODUCT_4)
+#define CHEF2_EVENT_MASK (EVENT_PRODUCT_5 | EVENT_PRODUCT_6)
+
+#define TASK_PRIO_CHEF   20
+#define TASK_STACK_SIZE  0x1000
+
+typedef struct {
+    UINT32 id;
+    const CHAR *name;
+    const CHAR *price;
+    UINT32 eventBit;
+    UINT32 chefNo;
+} ProductInfo;
+
+static EVENT_CB_S g_orderEvent;
+static UINT32 g_chef1TaskId = 0;
+static UINT32 g_chef2TaskId = 0;
+
+static ProductInfo g_products[PRODUCT_COUNT] = {
+    {1, "云吞",   "12元", EVENT_PRODUCT_1, 1},
+    {2, "拌面",   "15元", EVENT_PRODUCT_2, 1},
+    {3, "炒饭",   "18元", EVENT_PRODUCT_3, 1},
+    {4, "炒面",   "16元", EVENT_PRODUCT_4, 1},
+    {5, "鸡腿饭", "20元", EVENT_PRODUCT_5, 2},
+    {6, "猪腿饭", "22元", EVENT_PRODUCT_6, 2},
+};
+
+static ProductInfo *FindProductById(UINT32 id)
+{
+    UINT32 i;
+
+    for (i = 0; i < PRODUCT_COUNT; i++) {
+        if (g_products[i].id == id) {
+            return &g_products[i];
+        }
+    }
+    return NULL;
+}
+
+static ProductInfo *FindProductByEvent(UINT32 eventBit)
+{
+    UINT32 i;
+
+    for (i = 0; i < PRODUCT_COUNT; i++) {
+        if (g_products[i].eventBit == eventBit) {
+            return &g_products[i];
+        }
+    }
+    return NULL;
+}
+
+static VOID PrintMenu(VOID)
+{
+    UINT32 i;
+
+    printf("\n*******************点菜系统 :***********************\n");
+    for (i = 0; i < PRODUCT_COUNT; i++) {
+        printf("%u,%s\n", g_products[i].id, g_products[i].name);
+    }
+    printf("******请输入menu指令,之后空格加对应菜品的数值回车,进行点菜:\n");
+}
+
+static VOID PrintMenuUsage(VOID)
+{
+    printf("\n******testdemo******\n");
+    printf("Usage: menu <product_id>\n");
+    PrintMenu();
+}
+
+static VOID ChefHandleOrder(UINT32 chefNo, UINT32 eventMask, const CHAR *startMsg)
+{
+    UINT32 readEvent;
+    ProductInfo *product;
+
+    printf("%s", startMsg);
+
+    while (1) {
+        readEvent = LOS_EventRead(&g_orderEvent, eventMask,
+                                  LOS_WAITMODE_OR | LOS_WAITMODE_CLR, LOS_WAIT_FOREVER);
+        if (readEvent == 0) {
+            continue;
+        }
+
+        product = FindProductByEvent(readEvent & eventMask);
+        if (product != NULL) {
+            printf("<<==>>%u号厨师送来了:%s\n", chefNo, product->name);
+        }
+    }
+}
+
+static VOID Chef1TaskEntry(VOID)
+{
+    ChefHandleOrder(1, CHEF1_EVENT_MASK, "<<==>>1号厨师上班了.\n");
+}
+
+static VOID Chef2TaskEntry(VOID)
+{
+    ChefHandleOrder(2, CHEF2_EVENT_MASK, "<<==>>2号厨师上班了.\n");
+}
+
+static UINT32 CreateChefTask(const CHAR *name, TSK_ENTRY_FUNC entry, UINT32 *taskId)
+{
+    TSK_INIT_PARAM_S taskInitParam;
+    UINT32 ret;
+
+    (VOID)memset(&taskInitParam, 0, sizeof(TSK_INIT_PARAM_S));
+    taskInitParam.pfnTaskEntry = entry;
+    taskInitParam.uwStackSize = TASK_STACK_SIZE;
+    taskInitParam.pcName = (CHAR *)name;
+    taskInitParam.usTaskPrio = TASK_PRIO_CHEF;
+
+    ret = LOS_TaskCreate(taskId, &taskInitParam);
+    if (ret != LOS_OK) {
+        printf("create task %s failed, ret:0x%x\n", name, ret);
+    }
+    return ret;
+}
+
+static UINT32 OrderEventInit(VOID)
+{
+    UINT32 ret;
+
+    ret = LOS_EventInit(&g_orderEvent);
+    if (ret != LOS_OK) {
+        printf("<<==>>事件系统创建失败, ret:0x%x\n", ret);
+        return ret;
+    }
+
+    printf("<<==>>事件系统创建成功.\n");
+    printf("<<==>>学号:%s\n", STUDENT_ID);
+
+    ret = CreateChefTask("Chef1", (TSK_ENTRY_FUNC)Chef1TaskEntry, &g_chef1TaskId);
+    if (ret != LOS_OK) {
+        return ret;
+    }
+
+    ret = CreateChefTask("Chef2", (TSK_ENTRY_FUNC)Chef2TaskEntry, &g_chef2TaskId);
+    if (ret != LOS_OK) {
+        return ret;
+    }
+
+    PrintMenu();
+    return LOS_OK;
+}
+
+static VOID MenuCmdHandler(INT32 argc, const CHAR *argv[])
+{
+    INT32 productId;
+    ProductInfo *product;
+    UINT32 ret;
+    const CHAR *productArg = NULL;
+
+    /* CMD_TYPE_EX 会把命令关键字 menu 屏蔽，menu 1 传入的是 argc=1, argv[0]="1" */
+    if (argc < 1) {
+        PrintMenuUsage();
+        return;
+    }
+
+    productArg = argv[0];
+    productId = atoi(productArg);
+    product = FindProductById((UINT32)productId);
+    if (product == NULL) {
+        printf("<<==>>产品编号不合法, 请输入1-%u之间的编号.\n", PRODUCT_COUNT);
+        return;
+    }
+
+    ret = LOS_EventWrite(&g_orderEvent, product->eventBit);
+    if (ret != LOS_OK) {
+        printf("<<==>>下单失败, ret:0x%x\n", ret);
+        return;
+    }
+
+    printf("<<==>>下单成功%u.\n", product->id);
+}
+
+static UINT32 RegisterMenuShellCmd(VOID)
+{
+    UINT32 ret;
+
+    OsShellInit();
+    ret = osCmdReg(CMD_TYPE_EX, "menu", 0, (CMD_CBK_FUNC)MenuCmdHandler);
+    if (ret == LOS_OK) {
+        printf("<<==>>menu命令注册成功\n");
+    } else {
+        printf("<<==>>menu命令注册失败, ret:0x%x\n", ret);
+    }
+    return ret;
+}
+
+int register_user_test_cmd(void)
+{
+    UINT32 ret;
+
+    ret = OrderEventInit();
+    if (ret != LOS_OK) {
+        return (int)ret;
+    }
+
+    ret = RegisterMenuShellCmd();
+    if (ret != LOS_OK) {
+        return (int)ret;
+    }
+    return 0;
+}
