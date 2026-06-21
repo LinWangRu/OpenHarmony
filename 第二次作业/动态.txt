@@ -1,0 +1,30 @@
+#include <stdio.h>
+#include "shell.h"
+#include "shcmd.h"
+
+#define STUDENT_ID "2023192005linwangru"
+
+static int HiCmdHandler(int argc, const char **argv)
+{
+    (void)argc;
+    (void)argv;
+    printf("Hi! 学号: %s\n", STUDENT_ID);
+    return 0;
+}
+
+int register_dynamic_cmd(void)
+{
+    unsigned int ret;
+
+    OsShellInit();
+
+    ret = osCmdReg(CMD_TYPE_EX, "hi", 0, (CMD_CBK_FUNC)HiCmdHandler);
+    if (ret == LOS_OK) {
+        printf("【动态注册】命令 'hi' 注册成功，学号: %s\n", STUDENT_ID);
+    } else {
+        printf("【动态注册】命令 'hi' 注册失败，ret: 0x%x\n", ret);
+        return -1;
+    }
+
+    return 0;
+}

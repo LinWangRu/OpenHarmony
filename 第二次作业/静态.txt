@@ -1,0 +1,28 @@
+#include <stdio.h>
+#include "shell.h"
+#include "shcmd.h"
+
+#define STUDENT_ID "2023192005linwangru"
+
+static int HelloCmdHandler(int argc, const char **argv)
+{
+    (void)argc;
+    (void)argv;
+    printf("Hello! 学号: %s\n", STUDENT_ID);
+    return 0;
+}
+
+
+__attribute__((used, section(".liteos.table.shellcmd"))) static CmdItem g_helloCmdItem = {
+    CMD_TYPE_EX,                           
+    "hello",                               
+    0,                                     
+    (CMD_CBK_FUNC)HelloCmdHandler          
+};
+
+int register_static_cmd(void)
+{
+    printf("【静态注册】命令 'hello' 已通过 section 属性注册到 shellcmd 段\n");
+    printf("学号: %s\n", STUDENT_ID);
+    return 0;
+}
